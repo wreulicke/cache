@@ -5,15 +5,16 @@ import (
 	"time"
 )
 
-type Result[T any] struct {
+type result[T any] struct {
 	value  T
 	err    error
 	expire time.Time
 }
 
 type call[T any] struct {
-	wg  sync.WaitGroup
-	res Result[T]
+	wg   sync.WaitGroup
+	done bool
+	res  result[T]
 }
 
 type Cache[T any] interface {
@@ -35,22 +36,23 @@ func NewCache[T any](f func() (T, error), duration time.Duration) Cache[T] {
 func (c *cache[T]) Get() (T, error) {
 	c.mu.Lock()
 	call := c.call
-	c.mu.Unlock()
-
 	if call == nil {
-		return c.Refresh()
+		return c.refresh()
+	} else if call.done && time.Now().After(call.res.expire) {
+		return c.refresh()
 	}
-
+	c.mu.Unlock()
 	call.wg.Wait()
-	if time.Now().After(call.res.expire) {
-		return c.Refresh()
-	}
 
 	return call.res.value, call.res.err
 }
 
 func (c *cache[T]) Refresh() (T, error) {
 	c.mu.Lock()
+	return c.refresh()
+}
+
+func (c *cache[T]) refresh() (T, error) {
 	call := &call[T]{}
 	c.call = call
 	call.wg.Add(1)
@@ -59,6 +61,7 @@ func (c *cache[T]) Refresh() (T, error) {
 	call.res.value, call.res.err = c.f()
 	call.res.expire = time.Now().Add(c.duration)
 	call.wg.Done()
+	call.done = true
 	return call.res.value, call.res.err
 }
 
