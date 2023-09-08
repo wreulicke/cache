@@ -22,7 +22,7 @@ type Cache[T any] interface {
 
 type cache[T any] struct {
 	duration time.Duration
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	call     *call[T]
 	result   *result[T]
 	f        func() (T, error)
@@ -33,28 +33,31 @@ func NewCache[T any](f func() (T, error), duration time.Duration) Cache[T] {
 }
 
 func (c *cache[T]) Get() (T, error) {
-	c.mu.Lock()
+	c.mu.RLock()
 	res := c.result
 	if res == nil {
 		return c.refresh()
 	} else if time.Now().After(res.expire) {
 		return c.refresh()
 	} else {
-		c.mu.Unlock()
+		c.mu.RUnlock()
 		return res.value, res.err
 	}
 }
 func (c *cache[T]) Refresh() (T, error) {
-	c.mu.Lock()
+	c.mu.RLock()
 	return c.refresh()
 }
 
 func (c *cache[T]) refresh() (T, error) {
 	if call := c.call; call != nil {
-		c.mu.Unlock()
-		c.call.wg.Wait()
+		c.mu.RUnlock()
+		call.wg.Wait()
 		return c.result.value, c.result.err
 	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
 	call := &call[T]{}
 	c.call = call
 	call.wg.Add(1)
