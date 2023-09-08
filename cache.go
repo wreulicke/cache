@@ -12,9 +12,8 @@ type result[T any] struct {
 }
 
 type call[T any] struct {
-	wg   sync.WaitGroup
-	done bool
-	res  result[T]
+	wg  sync.WaitGroup
+	res result[T]
 }
 
 type Cache[T any] interface {
@@ -26,6 +25,7 @@ type cache[T any] struct {
 	duration time.Duration
 	mu       sync.Mutex
 	call     *call[T]
+	result   *result[T]
 	f        func() (T, error)
 }
 
@@ -35,24 +35,27 @@ func NewCache[T any](f func() (T, error), duration time.Duration) Cache[T] {
 
 func (c *cache[T]) Get() (T, error) {
 	c.mu.Lock()
-	call := c.call
-	if call == nil {
+	res := c.result
+	if res == nil {
 		return c.refresh()
-	} else if call.done && time.Now().After(call.res.expire) {
+	} else if time.Now().After(res.expire) {
 		return c.refresh()
+	} else {
+		c.mu.Unlock()
+		return res.value, res.err
 	}
-	c.mu.Unlock()
-	call.wg.Wait()
-
-	return call.res.value, call.res.err
 }
-
 func (c *cache[T]) Refresh() (T, error) {
 	c.mu.Lock()
 	return c.refresh()
 }
 
 func (c *cache[T]) refresh() (T, error) {
+	if call := c.call; call != nil {
+		c.mu.Unlock()
+		c.call.wg.Wait()
+		return call.res.value, call.res.err
+	}
 	call := &call[T]{}
 	c.call = call
 	call.wg.Add(1)
@@ -61,7 +64,11 @@ func (c *cache[T]) refresh() (T, error) {
 	call.res.value, call.res.err = c.f()
 	call.res.expire = time.Now().Add(c.duration)
 	call.wg.Done()
-	call.done = true
+
+	c.mu.Lock()
+	c.call = nil
+	c.result = &call.res
+	c.mu.Unlock()
 	return call.res.value, call.res.err
 }
 
