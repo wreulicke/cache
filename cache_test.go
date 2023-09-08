@@ -39,14 +39,16 @@ func TestCache_Race(t *testing.T) {
 
 func TestCache_Expire(t *testing.T) {
 	var wg sync.WaitGroup
+	var count int
 	cache := NewCache(func() (string, error) {
 		wg.Done()
+		count++
 		return "Hello, World!", nil
 	}, 10*time.Millisecond)
 
 	wg.Add(2)
 	go func() {
-		for {
+		for count < 2 {
 			cache.Get()
 		}
 	}()
