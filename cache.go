@@ -12,8 +12,7 @@ type result[T any] struct {
 }
 
 type call[T any] struct {
-	wg  sync.WaitGroup
-	res result[T]
+	wg sync.WaitGroup
 }
 
 type Cache[T any] interface {
@@ -54,22 +53,23 @@ func (c *cache[T]) refresh() (T, error) {
 	if call := c.call; call != nil {
 		c.mu.Unlock()
 		c.call.wg.Wait()
-		return call.res.value, call.res.err
+		return c.result.value, c.result.err
 	}
 	call := &call[T]{}
 	c.call = call
 	call.wg.Add(1)
 	c.mu.Unlock()
 
-	call.res.value, call.res.err = c.f()
-	call.res.expire = time.Now().Add(c.duration)
-	call.wg.Done()
-
+	var res result[T]
+	res.value, res.err = c.f()
+	res.expire = time.Now().Add(c.duration)
 	c.mu.Lock()
 	c.call = nil
-	c.result = &call.res
+	c.result = &res
 	c.mu.Unlock()
-	return call.res.value, call.res.err
+	call.wg.Done()
+
+	return res.value, res.err
 }
 
 type RefreshingCache[T any] struct {
